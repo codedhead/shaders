@@ -1,0 +1,17 @@
+particle, effects
+
+http://glsl.heroku.com/e#16009.2
+http://glsl.heroku.com/e#16053.0
+http://glsl.heroku.com/e#16059.0
+http://glsl.heroku.com/e#15936.0
+http://glsl.heroku.com/e#16007.0
+
+galaxy
+http://glsl.heroku.com/e#15772.0
+http://glsl.heroku.com/e#15740.0
+
+flappy
+http://glsl.heroku.com/e#16053.0
+
+tracing
+http://glsl.heroku.com/e#16045.0
