@@ -73,6 +73,12 @@ float time=10.;
 #define OUT_PARAM(_type) _type&
 #define SET_COL(_mat,_i,_col) (_mat).setCol((_i),(_col))
 
+mat3 INIT_MAT3(float _m1,float _m2,float _m3,float _m4,float _m5,float _m6,float _m7,float _m8,float _m9)
+{
+	 float data[]={_m1,_m2,_m3,_m4,_m5,_m6,_m7,_m8,_m9};
+	 return mat3(data);
+}
+
 #else
 
 //#ifdef GL_ES
@@ -88,18 +94,20 @@ float time=10.;
 #define make_float2 vec2
 #define make_float3 vec3
 #define make_float4 vec4
+#define INIT_MAT3 mat3
 
 #endif
 
-
+float seed = 0.;
+float rand() { return fract(sin(seed++)*43758.5453123); }
 
 ///////////////////////////////////////////////////////////////////////////
 // glsl code
 
 #define PI 3.14159
+#define INV_PI (1./PI)
 #define D2R(_d) ((_d)*PI/180.)
 
-const int max_depth=6;
 const int rr_depth=5;
 
 vec3 cam_origin=make_float3(272.691711, 277.386017, -760.679871);
@@ -107,14 +115,15 @@ vec3 cam_target=make_float3(272.696594, 277.381134, -759.679871);
 vec3 cam_up=make_float3(0.,1.,0.);
 float cam_vfov=D2R(39.3077);
 
-#define OBJ_COUNT 1
+#define MAX_DEPTH 2
+#define OBJ_COUNT 4
 #define OBJ_NONE -1.
 #define OBJ_VIRTUAL -2.
 
 #define FLT_MAX 3.402823466e+38
 
 #define RAY_MARCHING_EPS 1.
-#define RAY_MARCHING_MAX_ITER 64
+#define RAY_MARCHING_MAX_ITER 32
 
 const float scene_scale=5500.;
 
@@ -219,22 +228,45 @@ vec2 dist(int objId,vec3 p,vec3 ray_dir)
 		
 		if(q.z<-b.z-RAY_MARCHING_EPS) // get to -z face first
 		{
-			d=sdBox(q,b,ray_dir);
+			// flip side
+			d=-sdBox(q,b,ray_dir);
 			isvirtual=1.;
 		}
 		else
-			d=sdBox(make_float3(q.xy,q.z+b.z),make_float3(b.xy,2.*b.z),ray_dir);
-		
+		{
+			// flip side
+			d=-sdBox(make_float3(q.xy,q.z+b.z),make_float3(b.xy,2.*b.z),ray_dir);
+		}		
 	}
 	// short box
-	/*else if(objId==1)
-		;
+	else if(objId==1)
+	{
+		mat3 w2o=INIT_MAT3(
+			0.953400, 		0,		-0.285121,
+			0, 				1.,		0,
+			0.301709,		0.,		0.958492);
+		vec3 b=make_float3(165.*0.5);
+		vec3 q=w2o*(p-make_float3(175.,82.5,168.5));		
+		d=udBox(q,b,ray_dir);
+	}
 	// tall box
 	else if(objId==2)
-		;
+	{
+		mat3 w2o=INIT_MAT3(
+			0.955649, 		0,		0.301709,
+			0, 				1., 	0,
+			-0.294508, 		0, 		0.953400);
+		vec3 b=make_float3(165.*0.5,165.,165.*0.5);
+		vec3 q=w2o*(p-make_float3(368.5,165.,351.5));		
+		d=udBox(q,b,ray_dir);
+	}		
 	// light
 	else if(objId==3)
-		;*/
+	{
+		vec3 q=p-make_float3(556.*0.5,548.8,559.*0.5);
+		vec3 b=make_float3(65.,0.,52.5);
+		d=udBox(q,b,ray_dir);
+	}
 	return make_float2(d,isvirtual);
 }
 
@@ -334,11 +366,86 @@ float intersect(Ray ray,float maxDist,OUT_PARAM(vec3) p,OUT_PARAM(vec3) normal)
 	return cobj.x;
 }
 
+float intersect(Ray ray,float maxDist)
+{
+	vec3 p=ray.origin;
+	
+	float accum_dist=0.;	
+	vec2 cobj=make_float2(OBJ_NONE,FLT_MAX);
+	
+	for(int rmi=0;rmi<RAY_MARCHING_MAX_ITER;rmi++)
+	{
+		cobj=closestObj(p,ray.dir,maxDist-accum_dist);
+		
+		if(cobj.x==OBJ_NONE||(cobj.x!=OBJ_VIRTUAL&&cobj.y<RAY_MARCHING_EPS))
+		{
+			break;
+		}
+		
+		// else: ray marching		
+		accum_dist+=cobj.y;
+		p+=cobj.y*ray.dir;// more accurate?
+	}
+	
+	return cobj.x;
+}
+
 ///////////////////////////////////////////////////////////////////////
 // material
-vec3 shade(float objId,vec3 p,vec3 n)
+
+void sampleLight(vec3 ref_p,OUT_PARAM(vec3) L,OUT_PARAM(vec3) Lp,
+				 OUT_PARAM(vec3) Ln,OUT_PARAM(float) pdf)
 {
-	if(objId==0.)
+	vec2 uv=make_float2(rand(),rand());
+	Lp=make_float3(213.,548.8,227.)+make_float3(uv.x*130.,0.,uv.y*105.);
+	Ln=make_float3(0.,-1.,0.);
+	L=make_float3(18.4);
+	pdf=1./(130.*105.);
+}
+
+vec3 shade(float objId,vec3 p,vec3 n,vec3 alpha)
+{
+	vec3 res=make_float3(0.);
+	vec3 L,Lp,Ln;
+	float pdf;
+	sampleLight(p,L,Lp,Ln,pdf);
+	
+	Ray shadow_ray;
+	shadow_ray.origin=p;
+	shadow_ray.dir=normalize(Lp-p);
+	
+	if(dot(shadow_ray.dir,Ln)>=0.) return res;
+	
+	float max_dist=length(Lp-p);
+	bool shadowed=(intersect(shadow_ray,max_dist)!=OBJ_NONE);
+	
+	
+	if(!shadowed)
+	{
+		vec3 f=make_float3(0.);
+		if(objId==0.)
+		{
+			float x=0.5*(n.x+1.);
+			float y=abs(n.y)+abs(n.z);
+			f=INV_PI*
+				make_float3(0.7*(1.-x+0.5*y),0.7*(x+0.5*y),0.4*y);
+		}
+		else if(objId==1.||objId==2.)
+		{
+			f=INV_PI*make_float3(0.7,0.7,0.4);
+		}
+		else if(objId==3.)
+		{
+			f=INV_PI*make_float3(0.5);
+		}
+		
+		float g=abs(dot(shadow_ray.dir,n))*
+				abs(dot(shadow_ray.dir,Ln))/(max_dist*max_dist);
+		res=alpha*f*g*L/pdf;
+	}
+	
+	return res;
+	/*if(objId>=0.)
 	{
 		//return make_float3(1.0,1.,0.);
 		//return make_float3(p.x/550.,0.,0.);
@@ -350,11 +457,45 @@ vec3 shade(float objId,vec3 p,vec3 n)
 		//return make_float3(0.);
 	}
 	else 
-		return make_float3(0.);
+		return make_float3(0.);*/
 }
 
-void sampleBSDF(float objId)
+
+vec3 uniformHemisphere(float u1, float u2)
 {
+	float z=u1;
+	float r=sqrt(1.-z*z);
+	float phi=2.*PI*u2;
+	return make_float3(r*cos(phi),r*sin(phi),z);
+}
+
+vec3 l2w(vec3 l,vec3 normal)
+{
+	vec3 binormal,tangent;
+	
+	if( abs(normal.x) > abs(normal.z) )
+	{
+		binormal.x = -normal.y;
+		binormal.y =  normal.x;
+		binormal.z =  0.;
+	}
+	else
+	{
+		binormal.x =  0.;
+		binormal.y = -normal.z;
+		binormal.z =  normal.y;
+	}
+	
+	binormal = normalize(binormal);
+	tangent = cross( binormal, normal );
+	
+	return l.x*tangent+l.y*binormal+l.z*normal;
+}
+
+vec3 sampleBSDF(float objId,vec3 p,vec3 n)
+{
+	vec3 dir=uniformHemisphere(rand(),rand());
+	return l2w(dir,n);
 }
 
 
@@ -369,25 +510,21 @@ void main()
 	//return;
 	
 	vec4 res=make_float4(0.);
-	vec3 p,n;
+	vec3 p,n,alpha=make_float3(1.);
 	
-	for(int d=1;d<max_depth;++d)
+	for(int d=1;d<MAX_DEPTH;++d)
 	{
-		//int oo=intersectm(ray,scene_scale,p,n);
 		float obj=intersect(ray,scene_scale,p,n);
-		//int obj=0;
-		//n=make_float3(length(ray.origin));
-		//gl_FragColor=make_float4(heatMap(float(obj+1)/10.),1.);
 		if(obj==OBJ_NONE)
 		{
 			//res=make_float4(1.);
 			//rayMiss(ray);
 			//break;
 		}
-		res+=make_float4(shade(obj,p,n),1.);
+		res+=make_float4(shade(obj,p,n,alpha),1.);
 		
-		//ray=sampleRay(obj);
-		break;
+		ray.origin=p;
+		ray.dir=sampleBSDF(obj,p,n);
 	}
 	
 	gl_FragColor=res;
