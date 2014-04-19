@@ -65,8 +65,8 @@ vec2 abs(vec2 a)
 
 // global variables
 vec4 gl_FragColor=make_float4(0.);
-vec2 gl_FragCoord=make_float2(256.,256.);
-vec2 resolution=make_float2(512.,512.);//800.,450.);
+vec2 gl_FragCoord=make_float2(400.,340.);
+vec2 resolution=make_float2(800.,450.);
 float time=10.;
 
 #define IN_PARAM(_type) _type&
@@ -77,6 +77,11 @@ mat3 INIT_MAT3(float _m1,float _m2,float _m3,float _m4,float _m5,float _m6,float
 {
 	 float data[]={_m1,_m2,_m3,_m4,_m5,_m6,_m7,_m8,_m9};
 	 return mat3(data);
+}
+
+float rnd()
+{
+	return (float)rand()/(float)RAND_MAX;
 }
 
 #else
@@ -96,10 +101,11 @@ mat3 INIT_MAT3(float _m1,float _m2,float _m3,float _m4,float _m5,float _m6,float
 #define make_float4 vec4
 #define INIT_MAT3 mat3
 
+float seed = 0.;
+float rnd() { return fract(sin(seed++)*43758.5453123); }
+
 #endif
 
-float seed = 0.;
-float rand() { return fract(sin(seed++)*43758.5453123); }
 
 ///////////////////////////////////////////////////////////////////////////
 // glsl code
@@ -123,7 +129,7 @@ float cam_vfov=D2R(39.3077);
 #define FLT_MAX 3.402823466e+38
 
 #define RAY_MARCHING_EPS 1.
-#define RAY_MARCHING_MAX_ITER 32
+#define RAY_MARCHING_MAX_ITER 128
 
 const float scene_scale=5500.;
 
@@ -341,18 +347,23 @@ vec3 gradNormal(int objId,vec3 p) {
 }
 /**/
 
-float intersect(Ray ray,float maxDist,OUT_PARAM(vec3) p,OUT_PARAM(vec3) normal)
+bool ishit(vec2 cobj,float accum_dist,float minDist,float maxDist)
+{
+	return (cobj.x!=OBJ_VIRTUAL&&(accum_dist+cobj.y>minDist)&&cobj.y<RAY_MARCHING_EPS);
+}
+
+float intersect(Ray ray,float minDist,float maxDist,OUT_PARAM(vec3) p,OUT_PARAM(vec3) normal)
 {
 	p=ray.origin;
 	
-	float accum_dist=0.;	
-	vec2 cobj=make_float2(OBJ_NONE,FLT_MAX);
-	
+	float accum_dist=0.;
+	vec2 cobj;
+
 	for(int rmi=0;rmi<RAY_MARCHING_MAX_ITER;rmi++)
 	{
 		cobj=closestObj(p,ray.dir,maxDist-accum_dist);
 		
-		if(cobj.x==OBJ_NONE||(cobj.x!=OBJ_VIRTUAL&&cobj.y<RAY_MARCHING_EPS))
+		if(cobj.x==OBJ_NONE||ishit(cobj,accum_dist,minDist,maxDist))
 		{
 			break;
 		}
@@ -362,22 +373,30 @@ float intersect(Ray ray,float maxDist,OUT_PARAM(vec3) p,OUT_PARAM(vec3) normal)
 		p+=cobj.y*ray.dir;// more accurate?
 	}
 	
-	normal=gradNormal(int(cobj.x),p);
-	return cobj.x;
+	if(ishit(cobj,accum_dist,minDist,maxDist))
+	{
+		normal=gradNormal(int(cobj.x),p);
+		return cobj.x;
+	}
+	else
+	{
+		normal=make_float3(0.);
+		return OBJ_NONE;
+	}
 }
 
-float intersect(Ray ray,float maxDist)
+float intersect(Ray ray,float minDist,float maxDist)
 {
 	vec3 p=ray.origin;
 	
-	float accum_dist=0.;	
-	vec2 cobj=make_float2(OBJ_NONE,FLT_MAX);
-	
+	float accum_dist=0.;
+	vec2 cobj;
+
 	for(int rmi=0;rmi<RAY_MARCHING_MAX_ITER;rmi++)
 	{
 		cobj=closestObj(p,ray.dir,maxDist-accum_dist);
 		
-		if(cobj.x==OBJ_NONE||(cobj.x!=OBJ_VIRTUAL&&cobj.y<RAY_MARCHING_EPS))
+		if(cobj.x==OBJ_NONE||ishit(cobj,accum_dist,minDist,maxDist))
 		{
 			break;
 		}
@@ -387,7 +406,14 @@ float intersect(Ray ray,float maxDist)
 		p+=cobj.y*ray.dir;// more accurate?
 	}
 	
-	return cobj.x;
+	if(ishit(cobj,accum_dist,minDist,maxDist))
+	{
+		return cobj.x;
+	}
+	else
+	{
+		return OBJ_NONE;
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -396,7 +422,7 @@ float intersect(Ray ray,float maxDist)
 void sampleLight(vec3 ref_p,OUT_PARAM(vec3) L,OUT_PARAM(vec3) Lp,
 				 OUT_PARAM(vec3) Ln,OUT_PARAM(float) pdf)
 {
-	vec2 uv=make_float2(rand(),rand());
+	vec2 uv=make_float2(rnd(),rnd());
 	Lp=make_float3(213.,548.8,227.)+make_float3(uv.x*130.,0.,uv.y*105.);
 	Ln=make_float3(0.,-1.,0.);
 	L=make_float3(18.4);
@@ -405,6 +431,7 @@ void sampleLight(vec3 ref_p,OUT_PARAM(vec3) L,OUT_PARAM(vec3) Lp,
 
 vec3 shade(float objId,vec3 p,vec3 n,vec3 alpha)
 {
+	
 	vec3 res=make_float3(0.);
 	vec3 L,Lp,Ln;
 	float pdf;
@@ -417,7 +444,7 @@ vec3 shade(float objId,vec3 p,vec3 n,vec3 alpha)
 	if(dot(shadow_ray.dir,Ln)>=0.) return res;
 	
 	float max_dist=length(Lp-p);
-	bool shadowed=(intersect(shadow_ray,max_dist)!=OBJ_NONE);
+	bool shadowed=(intersect(shadow_ray,RAY_MARCHING_EPS,max_dist)!=OBJ_NONE);
 	
 	
 	if(!shadowed)
@@ -494,7 +521,7 @@ vec3 l2w(vec3 l,vec3 normal)
 
 vec3 sampleBSDF(float objId,vec3 p,vec3 n)
 {
-	vec3 dir=uniformHemisphere(rand(),rand());
+	vec3 dir=uniformHemisphere(rnd(),rnd());
 	return l2w(dir,n);
 }
 
@@ -514,7 +541,7 @@ void main()
 	
 	for(int d=1;d<MAX_DEPTH;++d)
 	{
-		float obj=intersect(ray,scene_scale,p,n);
+		float obj=intersect(ray,RAY_MARCHING_EPS,scene_scale,p,n);
 		if(obj==OBJ_NONE)
 		{
 			//res=make_float4(1.);
