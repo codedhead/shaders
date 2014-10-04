@@ -3,6 +3,7 @@
 #include<optix_world.h>
 #include<stdio.h>
 #include <omp.h>
+#include <float.h>
 
 using optix::float2;
 using optix::float3;
@@ -16,6 +17,8 @@ using optix::length;
 // using optix::abs;
 // using optix::min;
 // using optix::max;
+
+#undef optix::Ray
 
 typedef float4 vec4;
 //typedef float3 vec3;
@@ -62,6 +65,20 @@ vec2 abs(vec2 a)
 	return make_float2(fabsf(a.x),fabsf(a.y));
 }
 
+float sign(float x)
+{
+	return x<0.f?-1.f:1.f;
+}
+
+__forceinline__ bool _valid(float v)
+{
+	return _finite(v)&&!_isnan(v);
+}
+__forceinline__ bool _valid(vec3 v)
+{
+	return _valid(v.x)&&_valid(v.y)&&_valid(v.z);
+}
+
 // global variables
 vec2 resolution=make_float2(800.,450.);
 float time=10.;
@@ -72,7 +89,8 @@ float time=10.;
 
 mat3 INIT_MAT3(float _m1,float _m2,float _m3,float _m4,float _m5,float _m6,float _m7,float _m8,float _m9)
 {
-	float data[]={_m1,_m2,_m3,_m4,_m5,_m6,_m7,_m8,_m9};
+	//float data[]={_m1,_m2,_m3,_m4,_m5,_m6,_m7,_m8,_m9};
+	float data[]={_m1,_m4,_m7,_m2,_m5,_m8,_m3,_m6,_m9}; // '
 	return mat3(data);
 }
 
@@ -126,18 +144,18 @@ int main()
 	float3* pres=output_buf;
 
 
-	#define DEBUG_PIXEL
+	//#define DEBUG_PIXEL
 #ifdef DEBUG_PIXEL
-	{{
-		int x=1,y=(int)resolution.y - 1 -1;
-		// 	for(int y=(int)resolution.y - 1-242;y<=(int)resolution.y - 1-240;++y)
-		// 	{
-		// 		for(int x=340;x<=345;++x){
-		// 
-		// 			if(x==344&&y==(int)resolution.y - 1-241)
-		// 			{
-		// 				x=x;y=y;
-		// 			}
+	//{{
+		//int x=389,y=(int)resolution.y - 195 -1;
+	for(int y=(int)resolution.y - 1-357;y<=(int)resolution.y - 1-340;++y)
+	{
+		for(int x=260;x<=274;++x){
+
+			if(x==344&&y==(int)resolution.y - 1-241)
+			{
+				x=x;y=y;
+			}
 #else
 #pragma omp parallel for
 	for(int y=0;y<(int)resolution.y;++y)
